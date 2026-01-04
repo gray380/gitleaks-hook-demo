@@ -41,7 +41,7 @@ To verify the hook works, attempt to commit a known secret pattern.
 
 1. Create a test file with a fake Telegram Bot Token:
    ```bash
-   echo "TELEGRAM_TOKEN=123456789:ABCDefGhIjKlMnOpQrStUvWxYz123456789" > secret.txt
+   echo "TELEGRAM_TOKEN=123456789:ABCDefGhIjKlMnOpQrStUvWxYz123456789" > secret.txt # gitleaks:allow
    ```
 
 2. Stage the file:
