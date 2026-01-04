@@ -1,0 +1,103 @@
+#!/bin/sh
+
+# Gitleaks Pre-commit Hook
+# Auto-installs gitleaks if missing and blocks commits with secrets.
+
+# 1. Configuration Check
+# Check if hook is enabled via git config (default: true)
+ENABLED=$(git config --bool hooks.gitleaks.enable)
+if [ "$ENABLED" = "false" ]; then
+    echo "Gitleaks hook is disabled via git config. Skipping..."
+    exit 0
+fi
+
+# 2. Dependency Check & Install
+# Function to install gitleaks
+install_gitleaks() {
+    echo "Gitleaks not found. Installing..."
+    
+    # Define installation directory (Repo local .bin to avoid sudo requirement)
+    # Using the repo's root directory to find .git
+    REPO_ROOT=$(git rev-parse --show-toplevel)
+    INSTALL_DIR="$REPO_ROOT/.git/hooks/bin"
+    mkdir -p "$INSTALL_DIR"
+    
+    # Detect OS and Arch
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    ARCH=$(uname -m)
+    
+    if [ "$ARCH" = "x86_64" ]; then
+        ARCH="x64"
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+        ARCH="arm64"
+    fi
+    
+    # We'll use a specific version for stability, or fetch latest. 
+    # For a "curl | sh" vibe, fetching the binary directly is best.
+    # Gitleaks releases are at: https://github.com/gitleaks/gitleaks/releases
+    VERSION="v8.18.1"
+    
+    echo "Detected OS: $OS, Arch: $ARCH"
+    
+    FILENAME="gitleaks_${OS}_${ARCH}"
+    if [ "$OS" = "linux" ] || [ "$OS" = "darwin" ]; then
+        EXTENSION="tar.gz"
+        URL="https://github.com/gitleaks/gitleaks/releases/download/${VERSION}/gitleaks_${VERSION:1}_${OS}_${ARCH}.tar.gz"
+    elif [ "$OS" = "windows" ] || [ "$OS" = "mingw64_nt" ]; then
+        # Minimal support for Windows bash (Git Bash)
+        OS="windows"
+        EXTENSION="zip"
+        URL="https://github.com/gitleaks/gitleaks/releases/download/${VERSION}/gitleaks_${VERSION:1}_${OS}_${ARCH}.zip"
+    else
+        echo "Unsupported OS: $OS"
+        exit 1
+    fi
+    
+    echo "Downloading $URL..."
+    curl -sSL "$URL" -o "$INSTALL_DIR/gitleaks_download.$EXTENSION"
+    
+    if [ "$EXTENSION" = "tar.gz" ]; then
+        tar -xzf "$INSTALL_DIR/gitleaks_download.$EXTENSION" -C "$INSTALL_DIR" gitleaks
+    elif [ "$EXTENSION" = "zip" ]; then
+        unzip -q "$INSTALL_DIR/gitleaks_download.$EXTENSION" -d "$INSTALL_DIR"
+    fi
+    
+    chmod +x "$INSTALL_DIR/gitleaks"
+    rm "$INSTALL_DIR/gitleaks_download.$EXTENSION"
+    
+    echo "Gitleaks installed to $INSTALL_DIR/gitleaks"
+}
+
+# Check if gitleaks is in PATH, if not check local bin, if not install
+if command -v gitleaks >/dev/null 2>&1; then
+    GITLEAKS_CMD="gitleaks"
+else
+    REPO_ROOT=$(git rev-parse --show-toplevel)
+    LOCAL_BIN="$REPO_ROOT/.git/hooks/bin/gitleaks"
+    
+    if [ -f "$LOCAL_BIN" ]; then
+        GITLEAKS_CMD="$LOCAL_BIN"
+    else
+        install_gitleaks
+        GITLEAKS_CMD="$LOCAL_BIN"
+    fi
+fi
+
+# 3. Execution
+echo "Running Gitleaks..."
+$GITLEAKS_CMD protect --staged --verbose --redact
+
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -ne 0 ]; then
+    echo "--------------------------------------------------------"
+    echo "❌ SECURITY CHECKS FAILED"
+    echo "Gitleaks detected secrets in your staged changes."
+    echo "Please remove the secrets before committing."
+    echo "To bypass (NOT RECOMMENDED), use 'git commit --no-verify'"
+    echo "--------------------------------------------------------"
+    exit 1
+fi
+
+echo "✅ Gitleaks passed."
+exit 0
